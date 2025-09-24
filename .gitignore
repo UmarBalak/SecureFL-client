@@ -1,3 +1,27 @@
+venv*
+.venv*
+
+.env
+.env.server
+.env.client
+
+DATA/
+data/
+federated_models/
+logs/
+models/
+global_model/
+GLOBAL_MODELS/
+plots/
+test.py
+
+*.bin
+*.json
+*.pkl
+*.npy
+.artifacts/
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
