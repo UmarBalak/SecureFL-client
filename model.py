@@ -8,51 +8,40 @@ class IoTModel:
         """Initialize the IoT model class"""
         pass
 
-    def create_mlp_model(self, input_dim, num_classes, architecture=[1024, 512, 256]):
+    def create_mlp_model(self, input_dim, num_classes, architecture=[256, 256]):
         """
-        Create an MLP model with comprehensive regularization techniques.
+        Create FL-compatible MLP model matching successful notebook architecture
+        
+        Research-proven architecture: [256, 256] layers with 5e-5 learning rate
+        FL Requirements:
+        - No BatchNormalization (causes FL synchronization issues)
+        - No Dropout (inconsistent between training/inference in FL)
+        - Consistent layer naming for weight aggregation
         
         Returns:
         --------
         model : tf.keras.models.Sequential
-            Compiled model with regularization
+            FL-compatible model with research-grade architecture
         """
         model = Sequential()
         
-        model.add(Dense(architecture[0], input_dim=input_dim,
-                        kernel_regularizer=l2(0.001)))
-        model.add(LeakyReLU(alpha=0.1))
-        # model.add(tf.keras.layers.Activation('swish'))
-        # model.add(Dropout(dropout_rate_for_1)) 
-        model.add(LayerNormalization())  
-
-        for i in range(1, len(architecture)):
-            model.add(Dense(architecture[i],
-                            kernel_regularizer=l2(0.001)))
-            model.add(LeakyReLU(alpha=0.1)) 
-            # model.add(tf.keras.layers.Activation('swish'))
-            # model.add(Dropout(dropout_rate_for_all))  
-            model.add(LayerNormalization())
+        # Build deep architecture with consistent naming (FL requirement)
+        for i, units in enumerate(architecture):
+            if i == 0:
+                model.add(Dense(units, 
+                               input_dim=input_dim, 
+                               kernel_regularizer=l2(0.001), 
+                               activation='relu', 
+                               name=f'dense_{i}'))
+            else:
+                model.add(Dense(units, 
+                               kernel_regularizer=l2(0.001), 
+                               activation='relu', 
+                               name=f'dense_{i}'))
         
-        model.add(Dense(num_classes, activation='softmax'))
+        # Output layer
+        model.add(Dense(num_classes, activation='softmax', name='output_dense'))
         
-        return model
-
-    
-    def create_quantized_mlp_model(self, input_dim, num_classes, architecture=[256, 128, 128, 64]):
-        model = Sequential()
-        model.add(Dense(architecture[0], input_dim=input_dim, activation='relu', kernel_regularizer=l2(0.0005)))
-        for units in architecture[1:]:
-            model.add(Dense(units, activation='relu', kernel_regularizer=l2(0.0005)))
- 
-        model.add(Dense(num_classes, activation='softmax'))
-
-        model.compile(
-            loss=tf.keras.losses.CategoricalCrossentropy(label_smoothing=0.1),
-            optimizer=tf.keras.optimizers.Adam(learning_rate=0.01),
-            metrics=['accuracy']
-        )
-
         return model
 
     def load_model(self, model_path):

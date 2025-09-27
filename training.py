@@ -304,15 +304,18 @@ class IoTModelTrainer:
         print(f"Model training completed in {training_time:.2f} seconds")
         # wandb.finish()
 
+        final_epsilon = 0
+
         if use_dp:
             actual_epochs = len(self.history.history['loss'])
             epsilon_dict = self.compute_epsilon(num_samples, batch_size, noise_multiplier, [actual_epochs], delta)
             
             for e, eps in epsilon_dict.items():
                 print(f"DP guarantee at epoch {e}: ε = {eps:.2f}, δ = {delta:.2e}")
+                final_epsilon = eps
         
 
-        return self.history, training_time, num_samples, delta, epsilon_dict
+        return self.history, training_time, num_samples, delta, final_epsilon
 
     
     def get_model(self):
