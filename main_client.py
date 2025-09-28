@@ -1,5 +1,3 @@
-# main_client_clean.py
-
 import os
 import numpy as np
 import tensorflow as tf
@@ -13,9 +11,9 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import clean preprocessor (no download logic)
 from preprocessing_client import IoTDataPreprocessorClient
-from training import IoTModelTrainer
+from training_client import IoTModelTrainer
 from evaluate import evaluate_model
-from functions import wait_for_csv, load_model_weights, upload_file, save_weights
+from functions import wait_for_csv, load_model_weights, upload_file, save_weights, upload_json_to_blob, get_versioned_metadata_filename
 from dotenv import load_dotenv
 
 # Configuration
@@ -26,6 +24,8 @@ ARTIFACTS_PATH = "artifacts"  # Websocket service downloads here
 script_directory = os.path.dirname(os.path.realpath(__file__))
 SAVE_DIR = os.path.join(script_directory, "models")
 GLOBAL_MODEL_PATH = os.path.join(script_directory, "GLOBAL_MODELS")
+
+CLIENT_CONTAINER_NAME = os.getenv("CLIENT_CONTAINER_NAME")
 
 load_dotenv(dotenv_path=".env.client")
 
@@ -42,6 +42,9 @@ def main(client_id, epochs=20):
         'model_architecture': [256, 256],  # Match server
         'learning_rate': 5e-5,  # Match server
         'num_classes': 15,
+        "l2_norm_clip": 3.0,
+        "noise_multiplier": 1.2,
+        "microbatches": 1,
     }
     
     # Set random seeds
@@ -119,9 +122,9 @@ def main(client_id, epochs=20):
         batch_size=config['batch_size'],
         verbose=2,
         use_dp=True,
-        l2_norm_clip=3.0,
-        noise_multiplier=1.2,
-        microbatches=1,
+        l2_norm_clip=config['l2_norm_clip'],
+        noise_multiplier=config['noise_multiplier'],
+        microbatches=config['microbatches'],
         learning_rate=config['learning_rate']
     )
     
@@ -160,18 +163,33 @@ def main(client_id, epochs=20):
     feature_info = preprocessor.get_feature_info()
     
     metadata = {
-        "final_test_loss": str(test_metrics['loss']),
-        "final_test_accuracy": str(test_metrics['accuracy']),
-        "final_test_f1": str(test_metrics['macro_f1']),
+                "final_test_loss": str(test_metrics['loss']),
+                "final_test_accuracy": str(test_metrics['accuracy']),
+                "final_test_precision": str(test_metrics['macro_precision']),
+                "final_test_recall": str(test_metrics['macro_recall']),
+                "final_test_f1": str(test_metrics['macro_f1']),
+            }
+
+    complete_metadata = {
+        "test_metrics": test_metrics,
         "num_training_samples": str(num_samples),
-        "epochs": str(epochs)
+        "data_classes_present": int(num_classes_train),
+        "batch_size": config['batch_size'],
+        "learning_rate": config['learning_rate'],
+        "differential_privacy": True,
+        "noise_multiplier": config['noise_multiplier'],
+        "final_epsilon": final_epsilon,
+        "delta": delta
     }
-    
-    upload_file(weights_path, os.getenv("CLIENT_CONTAINER_NAME"), metadata)
+
+    upload_file(weights_path, CLIENT_CONTAINER_NAME, metadata)
+
+    metadata_filename = get_versioned_metadata_filename(client_id, SAVE_DIR)
+    uploaded_metadata = upload_json_to_blob(complete_metadata, metadata_filename, CLIENT_CONTAINER_NAME, {})
     
     print(f"\n✅ Client {client_id} completed with server preprocessing!")
     return eval_results
 
 if __name__ == "__main__":
     CLIENT_ID = os.getenv("CLIENT_ID")
-    main(CLIENT_ID, epochs=20)
+    main(CLIENT_ID, epochs=2)

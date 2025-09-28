@@ -1,8 +1,11 @@
 import os
 import glob
 import time
+import logging
+import tempfile
 import json
 from datetime import datetime
+from typing import List, Optional, Tuple, Any, Dict
 import re
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
@@ -31,6 +34,44 @@ def upload_file(file_path, container_name, metadata):
         print(f"Weights ({filename}) uploaded successfully to Azure Blob Storage.")
     except Exception as e:
         print(f"Error uploading weights ({filename}): {e}")
+
+def upload_json_to_blob(data: Dict[str, Any], filename: str, container_name: str, metadata: Dict[str, str]) -> bool:
+    """
+    Serialize a Python dictionary to JSON and upload it to Azure Blob Storage.
+
+    Args:
+        data:        Dictionary to serialize as JSON.
+        filename:    Name of the blob (e.g., 'metrics.json').
+        metadata:    Key–value metadata to attach to the blob.
+
+    Returns:
+        bool: True on success, False on failure.
+    """
+    temp_path = None
+    try:
+        # Create a temporary JSON file
+        with tempfile.NamedTemporaryFile(suffix='.json', delete=False, mode='w', encoding='utf-8') as temp_file:
+            temp_path = temp_file.name
+            json.dump(data, temp_file, ensure_ascii=False, indent=2)
+
+        # Upload JSON file to Azure Blob Storage
+        blob_client =BLOB_SERVICE_CLIENT.get_blob_client(
+            container=container_name,
+            blob=filename
+        )
+        with open(temp_path, "rb") as file:
+            blob_client.upload_blob(file, overwrite=True, metadata=metadata)
+
+        print(f"Successfully uploaded JSON to blob: {filename}")
+        return True
+
+    except Exception as e:
+        print(f"Error uploading JSON to blob: {e}")
+        return False
+
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            os.unlink(temp_path)
 
 def save_run_info(config, model_info, eval_results):
     run_info = {
@@ -99,6 +140,18 @@ def get_versioned_filename(client_id, save_dir, extension=".h5"):
     next_version = max(existing_versions, default=0) + 1
     filename = f"client{client_id}_v{next_version}_{timestamp}.{extension}"
     return os.path.join(save_dir, filename), next_version, timestamp
+
+def get_versioned_metadata_filename(client_id, save_dir, extension=".json"):
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    version_pattern = re.compile(rf"client{client_id}_v(\d+).*\.{extension}")
+    existing_versions = [
+        int(version_pattern.match(f).group(1))
+        for f in os.listdir(save_dir)
+        if version_pattern.match(f)
+    ]
+    next_version = max(existing_versions, default=0) + 1
+    filename = f"client{client_id}_v{next_version}_{timestamp}.{extension}"
+    return filename
 
 def save_weights(client_id, model, save_dir):
     os.makedirs(save_dir, exist_ok=True)

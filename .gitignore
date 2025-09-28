@@ -20,7 +20,7 @@ test.py
 *.pkl
 *.npy
 .artifacts/
-
+.wandb/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

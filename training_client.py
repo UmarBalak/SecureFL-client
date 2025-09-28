@@ -102,7 +102,7 @@ class IoTModelTrainer:
     def train_model(self, X_train, y_train_cat, X_val, y_val_cat,
                 model, architecture, epochs=50, batch_size=64, verbose=2,
                 use_dp=True, l2_norm_clip=1.0, noise_multiplier=1.2, microbatches=1,
-                callbacks=None, epoch_checkpoints=None, learning_rate=0.0005):
+                callbacks=None, epoch_checkpoints=None, learning_rate=0.0005, use_wandb=False):
         """
         Train the MLP model with optional differential privacy.
 
@@ -198,19 +198,6 @@ class IoTModelTrainer:
             metrics=['accuracy']
         )
 
-        # wandb.init(
-        #         project="securefl-iot",
-        #         config={
-        #             "epochs": epochs,
-        #             "batch_size": batch_size,
-        #             "architecture": architecture,
-        #             "learning_rate": learning_rate,
-        #             "use_dp": use_dp,
-        #             "noise_multiplier": noise_multiplier,
-        #             "l2_norm_clip": l2_norm_clip
-        #         }
-        #     )
-
         default_callbacks = [
             ModelCheckpoint(
                 filepath='models/best_mlp_model.h5',
@@ -233,12 +220,40 @@ class IoTModelTrainer:
                 verbose=2
             )
         ]
-        all_callbacks = default_callbacks + callbacks
-        # all_callbacks = default_callbacks + callbacks + [
-        #     WandbMetricsLogger(log_freq=5),
-        #     WandbModelCheckpoint("models")   # will push best checkpoints to W&B
-        # ]
 
+        if use_wandb and wandb.run:
+            print("✅ Adding modern WandB callbacks with FIXED checkpoint paths...")
+            
+            # FIXED: Create checkpoint directory first
+            wandb_checkpoint_dir = "models/wandb_checkpoints"
+            os.makedirs(wandb_checkpoint_dir, exist_ok=True)
+            print(f"   Created checkpoint directory: {wandb_checkpoint_dir}")
+            
+            wandb_filepath = os.path.join(wandb_checkpoint_dir, "best_model_epoch_{epoch:02d}_f1_{val_type_f1:.4f}.h5")
+            
+            wandb_callbacks = [
+                WandbMetricsLogger(
+                    log_freq='epoch',  # Log metrics after each epoch
+                    initial_global_step=0
+                ),
+                WandbModelCheckpoint(
+                    filepath=wandb_filepath,  # FIXED: Proper directory + extension
+                    monitor='val_type_f1',
+                    save_best_only=True,
+                    mode='max',
+                    verbose=1,
+                    save_weights_only=True  # Save only weights for FL compatibility
+                )
+            ]
+            
+            print(f"   WandbMetricsLogger: Logging metrics every epoch")
+            print(f"   WandbModelCheckpoint: {wandb_filepath}")
+            print(f"   ✅ Directory exists: {os.path.exists(wandb_checkpoint_dir)}")
+            
+            # Add WandB callbacks to the list
+            default_callbacks.extend(wandb_callbacks)
+
+        all_callbacks = default_callbacks + callbacks
 
         start_time = time.time()
         mem_start = psutil.Process().memory_info().rss
@@ -302,7 +317,6 @@ class IoTModelTrainer:
         
         training_time = time.time() - start_time
         print(f"Model training completed in {training_time:.2f} seconds")
-        # wandb.finish()
 
         final_epsilon = 0
 
@@ -313,29 +327,23 @@ class IoTModelTrainer:
             for e, eps in epsilon_dict.items():
                 print(f"DP guarantee at epoch {e}: ε = {eps:.2f}, δ = {delta:.2e}")
                 final_epsilon = eps
-        
+
+        # Log training summary
+        if use_wandb and wandb.run:
+            wandb.log({
+                "training_summary/duration_seconds": training_time,
+                "training_summary/num_samples": num_samples,
+                "training_summary/epochs_completed": len(self.history.history.get('loss', [])) if self.history else 0,
+                "training_summary/success": training_success
+            })
 
         return self.history, training_time, num_samples, delta, final_epsilon
 
     
     def get_model(self):
-        """
-        Get the trained model
-
-        Returns:
-        --------
-        model : tf.keras.models.Sequential
-            Trained model
-        """
+        """Get the trained model"""
         return self.model
-
+    
     def get_history(self):
-        """
-        Get the training history
-
-        Returns:
-        --------
-        history : tf.keras.callbacks.History
-            Training history
-        """
+        """Get the training history"""
         return self.history
