@@ -11,13 +11,14 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 # Import clean preprocessor (no download logic)
 from preprocessing_client import IoTDataPreprocessorClient
-from training_client import IoTModelTrainer
+# from training_client import IoTModelTrainer
+from training_custom_gaussian import IoTModelTrainer
 from evaluate import evaluate_model
 from functions import wait_for_csv, load_model_weights, upload_file, save_weights, upload_json_to_blob, get_versioned_metadata_filename
 from dotenv import load_dotenv
 
 # Configuration
-DATASET_PATH = "./DATA/client_10.csv"
+DATASET_PATH = "./DATA/global_train.csv"
 TEST_DATASET_PATH = "./DATA/global_test.csv"
 ARTIFACTS_PATH = "artifacts"  # Websocket service downloads here
 
@@ -37,14 +38,14 @@ def main(client_id, epochs=20):
         'data_path': wait_for_csv(DATASET_PATH),
         'test_data_path': wait_for_csv(TEST_DATASET_PATH),
         'epochs': epochs,
-        'batch_size': 128,
+        'batch_size': 256,
         'random_state': 42,
-        'model_architecture': [256, 256],  # Match server
-        'learning_rate': 5e-5,  # Match server
+        'model_architecture': [256, 256],  # Match global
+        'learning_rate': 0.001,  # global = 5e-5 / better for client (tested) = 0.0001
         'num_classes': 15,
         "l2_norm_clip": 3.0,
-        "noise_multiplier": 1.2,
-        "microbatches": 1,
+        "noise_multiplier": 1.0,
+        'delta': 1e-5,
     }
     
     # Set random seeds
@@ -89,6 +90,9 @@ def main(client_id, epochs=20):
     )
     
     print(f"✅ Data ready: Train {X_train.shape}, Val {X_val.shape}, Test {X_test.shape}")
+
+    if len(X_train) > 5000:
+        config['batch_size'] = 512
     
     # --------------------------
     # 3) Build model with server dimensions
@@ -103,8 +107,8 @@ def main(client_id, epochs=20):
     print(f"✅ Model architecture: {X_train.shape[1]} → {config['model_architecture']} → {config['num_classes']}")
     
     # Load global model weights (downloaded by websocket service)
-    is_success, model = load_model_weights(model, GLOBAL_MODEL_PATH)
-    print("✅ Global model loaded" if is_success else "⚠️ Training from scratch")
+    # is_success, model = load_model_weights(model, GLOBAL_MODEL_PATH)
+    # print("✅ Global model loaded" if is_success else "⚠️ Training from scratch")
     
     # --------------------------
     # 4) Train model
@@ -114,22 +118,36 @@ def main(client_id, epochs=20):
     y_test_cat = to_categorical(y_test, num_classes=config['num_classes'])
     
     # Train with differential privacy
-    history, training_time, num_samples, delta, final_epsilon = trainer.train_model(
-        X_train, y_train_cat, X_val, y_val_cat,
-        model=model,
-        architecture=config['model_architecture'],
-        epochs=config['epochs'],
-        batch_size=config['batch_size'],
-        verbose=2,
-        use_dp=True,
-        l2_norm_clip=config['l2_norm_clip'],
-        noise_multiplier=config['noise_multiplier'],
-        microbatches=config['microbatches'],
-        learning_rate=config['learning_rate']
-    )
+    # history, training_time, num_samples, delta, final_epsilon = trainer.train_model(
+    #     X_train, y_train_cat, X_val, y_val_cat,
+    #     model=model,
+    #     architecture=config['model_architecture'],
+    #     epochs=config['epochs'],
+    #     batch_size=config['batch_size'],
+    #     verbose=2,
+    #     use_dp=True,
+    #     use_custom_dp=True,
+    #     l2_norm_clip=config['l2_norm_clip'],
+    #     noise_multiplier=config['noise_multiplier'],
+    #     learning_rate=config['learning_rate']
+    # )
+    # model = trainer.get_model()
+    history, dp_perf, final_eps = trainer.train_model(
+                X_train, y_train_cat, X_val, y_val_cat,
+                model=model,
+                epochs=config['epochs'],
+                batch_size=config['batch_size'],
+                verbose=2,
+                use_dp=True,
+                noise_type="gaussian",
+                l2_norm_clip=config['l2_norm_clip'],
+                noise_multiplier=config['noise_multiplier'],
+                delta=config['delta'],
+                learning_rate=config['learning_rate']
+            )
     
-    model = trainer.get_model()
     print("✅ Client training complete!")
+    print(f"Final epsilon = {final_eps}")
     
     # --------------------------
     # 5) Evaluate
@@ -145,6 +163,14 @@ def main(client_id, epochs=20):
             'Ransomware', 'SQL_injection', 'Uploading', 'Vulnerability_scanner', 'XSS'
         ]
         print(f"⚠️ Using fallback class names: {len(class_names)} classes")
+
+    # model.compile(
+    #         optimizer=tf.keras.optimizers.Adam(learning_rate=config['learning_rate']),
+    #         loss='categorical_crossentropy',
+    #         metrics=[
+    #             'accuracy'
+    #         ]
+    #     )
     
     eval_results = evaluate_model(model, X_test, y_test_cat, class_names=class_names)
     test_metrics = eval_results['test']
@@ -157,39 +183,40 @@ def main(client_id, epochs=20):
     # --------------------------
     # 6) Save and upload results
     # --------------------------
-    weights_path, timestamp = save_weights(client_id, model, SAVE_DIR)
+    # weights_path, timestamp = save_weights(client_id, model, SAVE_DIR)
     
     # Feature info for metadata
-    feature_info = preprocessor.get_feature_info()
+    # feature_info = preprocessor.get_feature_info()
     
-    metadata = {
-                "final_test_loss": str(test_metrics['loss']),
-                "final_test_accuracy": str(test_metrics['accuracy']),
-                "final_test_precision": str(test_metrics['macro_precision']),
-                "final_test_recall": str(test_metrics['macro_recall']),
-                "final_test_f1": str(test_metrics['macro_f1']),
-            }
+    # metadata = {
+    #             "final_test_loss": str(test_metrics['loss']),
+    #             "final_test_accuracy": str(test_metrics['accuracy']),
+    #             "final_test_precision": str(test_metrics['macro_precision']),
+    #             "final_test_recall": str(test_metrics['macro_recall']),
+    #             "final_test_f1": str(test_metrics['macro_f1']),
+    #             "num_training_samples": str(num_samples),
+    #         }
 
-    complete_metadata = {
-        "test_metrics": test_metrics,
-        "num_training_samples": str(num_samples),
-        "data_classes_present": int(num_classes_train),
-        "batch_size": config['batch_size'],
-        "learning_rate": config['learning_rate'],
-        "differential_privacy": True,
-        "noise_multiplier": config['noise_multiplier'],
-        "final_epsilon": final_epsilon,
-        "delta": delta
-    }
+    # complete_metadata = {
+    #     "test_metrics": test_metrics,
+    #     "num_training_samples": str(num_samples),
+    #     "data_classes_present": int(num_classes_train),
+    #     "batch_size": config['batch_size'],
+    #     "learning_rate": config['learning_rate'],
+    #     "differential_privacy": True,
+    #     "noise_multiplier": config['noise_multiplier'],
+    #     "final_epsilon": final_epsilon,
+    #     "delta": delta
+    # }
 
-    upload_file(weights_path, CLIENT_CONTAINER_NAME, metadata)
+    # upload_file(weights_path, CLIENT_CONTAINER_NAME, metadata)
 
-    metadata_filename = get_versioned_metadata_filename(client_id, SAVE_DIR)
-    uploaded_metadata = upload_json_to_blob(complete_metadata, metadata_filename, CLIENT_CONTAINER_NAME, {})
+    # metadata_filename = get_versioned_metadata_filename(client_id, SAVE_DIR)
+    # uploaded_metadata = upload_json_to_blob(complete_metadata, metadata_filename, CLIENT_CONTAINER_NAME, {})
     
     print(f"\n✅ Client {client_id} completed with server preprocessing!")
     return eval_results
 
 if __name__ == "__main__":
     CLIENT_ID = os.getenv("CLIENT_ID")
-    main(CLIENT_ID, epochs=2)
+    main(CLIENT_ID, epochs=20)

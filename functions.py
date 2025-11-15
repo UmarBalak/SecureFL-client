@@ -129,7 +129,7 @@ def load_model_weights(model, directory_path):
         print(f"Error loading weights: {str(e)}")
         return False, model
 
-def get_versioned_filename(client_id, save_dir, extension=".h5"):
+def get_versioned_filename(client_id, save_dir, extension="h5"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     version_pattern = re.compile(rf"client{client_id}_v(\d+).*\.{extension}")
     existing_versions = [
@@ -141,7 +141,7 @@ def get_versioned_filename(client_id, save_dir, extension=".h5"):
     filename = f"client{client_id}_v{next_version}_{timestamp}.{extension}"
     return os.path.join(save_dir, filename), next_version, timestamp
 
-def get_versioned_metadata_filename(client_id, save_dir, extension=".json"):
+def get_versioned_metadata_filename(client_id, save_dir, extension="json"):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     version_pattern = re.compile(rf"client{client_id}_v(\d+).*\.{extension}")
     existing_versions = [

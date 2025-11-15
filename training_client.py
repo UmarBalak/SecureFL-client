@@ -4,6 +4,7 @@ import time
 import os
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 from tensorflow.keras.callbacks import Callback, EarlyStopping, ModelCheckpoint, ReduceLROnPlateau
 from tensorflow_privacy.privacy.optimizers.dp_optimizer_keras import DPKerasAdamOptimizer
 import dp_accounting
@@ -102,7 +103,7 @@ class IoTModelTrainer:
     def train_model(self, X_train, y_train_cat, X_val, y_val_cat,
                 model, architecture, epochs=50, batch_size=64, verbose=2,
                 use_dp=True, l2_norm_clip=1.0, noise_multiplier=1.2, microbatches=1,
-                callbacks=None, epoch_checkpoints=None, learning_rate=0.0005, use_wandb=False):
+                callbacks=None, epoch_checkpoints=None, learning_rate=0.0005, num_classes=15, use_wandb=False):
         """
         Train the MLP model with optional differential privacy.
 
@@ -192,10 +193,13 @@ class IoTModelTrainer:
             epsilon_dict = {e: float("inf") for e in epoch_checkpoints}
             print("Using standard Adam optimizer (no DP)")
 
+        # Compile with F1-score monitoring (research-grade metrics)
         self.model.compile(
             optimizer=optimizer,
             loss='categorical_crossentropy',
-            metrics=['accuracy']
+            metrics=[
+                'accuracy'
+            ]
         )
 
         default_callbacks = [
@@ -215,9 +219,11 @@ class IoTModelTrainer:
             ),
             EarlyStopping(
                 monitor='val_loss',
+                mode='min',
                 patience=10,
                 restore_best_weights=True,
-                verbose=2
+                verbose=1,
+                min_delta=0.001
             )
         ]
 
@@ -270,50 +276,8 @@ class IoTModelTrainer:
             training_success = True
         except Exception as e:
             print(f"Training failed: {str(e)}")
-            print("Trying simpler DP configuration...")
-            
-            if use_dp:
-                optimizer = DPKerasAdamOptimizer(
-                    l2_norm_clip=l2_norm_clip,
-                    noise_multiplier=noise_multiplier,
-                    num_microbatches=1,
-                    learning_rate=learning_rate
-                )
-                self.model.compile(
-                    optimizer=optimizer,
-                    loss='categorical_crossentropy',
-                    metrics=['accuracy']
-                )
-                try:
-
-                    self.history = self.model.fit(
-                        X_train, y_train_cat,
-                        validation_data=(X_val, y_val_cat),
-                        epochs=epochs,
-                        batch_size=batch_size,
-                        callbacks=all_callbacks,
-                        verbose=verbose,
-
-                    )
-                    training_success = True
-                except Exception as e2:
-                    print(f"Training failed again: {str(e2)}")
-                    print("Falling back to non-DP optimizer")
-                    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
-                    self.model.compile(
-                        optimizer=optimizer,
-                        loss='categorical_crossentropy',
-                        metrics=['accuracy']
-                    )
-                    self.history = self.model.fit(
-                        X_train, y_train_cat,
-                        validation_data=(X_val, y_val_cat),
-                        epochs=epochs,
-                        batch_size=batch_size,
-                        callbacks=all_callbacks,
-                        verbose=verbose
-                    )
-                    training_success = True
+            self.history = None
+            training_success = False
         
         training_time = time.time() - start_time
         print(f"Model training completed in {training_time:.2f} seconds")
