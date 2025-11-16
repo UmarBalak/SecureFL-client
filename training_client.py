@@ -101,7 +101,7 @@ class IoTModelTrainer:
     
     
     def train_model(self, X_train, y_train_cat, X_val, y_val_cat,
-                model, architecture, epochs=50, batch_size=64, verbose=2,
+                model, epochs=50, batch_size=64, verbose=2,
                 use_dp=True, l2_norm_clip=1.0, noise_multiplier=1.2, microbatches=1,
                 callbacks=None, epoch_checkpoints=None, learning_rate=0.0005, num_classes=15, use_wandb=False):
         """
